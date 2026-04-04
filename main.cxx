@@ -3,6 +3,7 @@
 #include <memory>
 #include <raylib.h>
 #include <raymath.h>
+#include <string>
 #include <typeinfo>
 #include <vector>
 
@@ -145,7 +146,7 @@ private:
         if (top() < 0)
             velocity.y = defVelocity;
         else if (bottom() > wndHeight)
-            velocity.y = -defVelocity;
+            destroyed = true;
     }
 };
 
@@ -192,16 +193,23 @@ private:
 };
 
 class Brick : public Entity, public Rect {
+private:
+    int requiredHits{1};
+
 public:
-    static constexpr Color defColor{RED};
+    static constexpr Color defColorHits1{GOLD};
+    static constexpr Color defColorHits2{ORANGE};
+    static constexpr Color defColorHits3{RED};
+    static constexpr Color defColorHitsMore{DARKPURPLE};
     static constexpr float defWidth{60.f};
     static constexpr float defHeight{20.f};
 
-    Brick(float mX, float mY) {
-        color = defColor;
+    Brick(float mX, float mY, int totalHits = 1) {
         position = (Vector2){mX, mY};
         width = defWidth;
         height = defHeight;
+        requiredHits = totalHits;
+        refreshColor();
     }
 
     void update() override {}
@@ -212,6 +220,22 @@ public:
             (Vector2){width / 2.f, height / 2.f},
             0, color
         );
+    }
+
+    void takeDamage(int damage = 1) {
+        requiredHits -= damage;
+        if (requiredHits <= 0) {
+            destroyed = true;
+            return;
+        }
+        refreshColor();
+    }
+
+    void refreshColor() {
+        if (requiredHits == 1) color = defColorHits1;
+        else if (requiredHits == 2) color = defColorHits2;
+        else if (requiredHits == 3) color = defColorHits3;
+        else color = defColorHitsMore;
     }
 };
 
@@ -234,7 +258,7 @@ void solvePaddleBallCollision(const Paddle& mPaddle, Ball& mBall) noexcept {
 void solveBrickBallCollision(Brick& mBrick, Ball& mBall) noexcept {
     if (!isIntersecting(mBrick, mBall)) return;
 
-    mBrick.destroyed = true;
+    mBrick.takeDamage();
 
     // Calculate how much the ball intersects the brick in every direction.
     float overlapLeft{mBall.right() - mBrick.left()};
@@ -263,7 +287,9 @@ class Game {
 private:
     enum class State {
         Paused,
-        InProgress
+        InProgress,
+        GameOver,
+        Victory,
     };
 
     static constexpr int brkCountX{11}, brkCountY{4};
@@ -272,6 +298,7 @@ private:
 
     Manager manager;
     State state{State::InProgress};
+    int remainingLives{0};
 
 public:
     Game() {
@@ -280,6 +307,7 @@ public:
     }
 
     void restart() {
+        remainingLives = 3;
         state = State::InProgress;
 
         manager.clear();
@@ -292,7 +320,10 @@ public:
                 float x{(iX + brkStartColumn) * (Brick::defWidth + brkSpacing)};
                 float y{(iY + brkStartRow) * (Brick::defHeight + brkSpacing)};
 
-                manager.create<Brick>(brkOffsetX + x, y);
+                manager.create<Brick>(
+                    brkOffsetX + x, y,
+                    1 + ((iX * iY) % 3)
+                );
             }
         }
     }
@@ -300,10 +331,16 @@ public:
     void run() {
         while (!WindowShouldClose()) {
             if (IsKeyPressed(KEY_P)) {
-                if (state == State::Paused)
-                    state = State::InProgress;
-                else if (state == State::InProgress)
-                    state = State::Paused;
+                switch (state) {
+                    case State::Paused:
+                        state = State::InProgress; break;
+                    case State::InProgress:
+                        state = State::Paused; break;
+                    case State::GameOver:
+                    case State::Victory:
+                        restart(); break;
+                    default: break;
+                }
             }
 
             if (IsKeyPressed(KEY_R)) {
@@ -311,6 +348,16 @@ public:
             }
 
             if (state == State::InProgress) {
+                if (manager.getAll<Ball>().empty()) {
+                    remainingLives--;
+                    if (remainingLives <= 0)
+                        state = State::GameOver;
+                    else
+                        manager.create<Ball>();
+                }
+                if (manager.getAll<Brick>().empty())
+                    state = State::Victory;
+
                 manager.update();
 
                 manager.forEach<Ball>([this](auto& mBall) {
@@ -324,6 +371,20 @@ public:
 
                 manager.refresh();
             }
+
+            std::string text{""};
+            switch (state) {
+                case State::Paused:
+                    text = "Paused"; break;
+                case State::InProgress:
+                    text = std::to_string(remainingLives); break;
+                case State::GameOver:
+                    text = "Game Over!"; break;
+                case State::Victory:
+                    text = "You Win!"; break;
+                default: break;
+            }
+            DrawText(text.c_str(), wndWidth / 2.f, wndHeight / 2.f, 50, DARKGRAY);
 
             BeginDrawing();
             ClearBackground(BLACK);
