@@ -1,9 +1,87 @@
 #include <algorithm>
+#include <map>
+#include <memory>
 #include <raylib.h>
 #include <raymath.h>
+#include <typeinfo>
 #include <vector>
 
 constexpr unsigned int wndWidth{800}, wndHeight{600};
+
+class Entity {
+public:
+    bool destroyed{false};
+
+    virtual ~Entity() {}
+    virtual void update() {}
+    virtual void draw() {}
+};
+
+class Manager {
+private:
+    std::vector<std::unique_ptr<Entity>> entities;
+    std::map<std::size_t, std::vector<Entity*>> groupedEntities;
+    
+public:
+    // https://github.com/vittorioromeo/cppcon2014/blob/master/code/p10.cpp
+    template <typename T, typename... TArgs>
+    T& create(TArgs&&... mArgs) {
+        static_assert(std::is_base_of<Entity, T>::value,
+            "`T` must be derived from `Entity`");
+
+        auto uPtr(std::make_unique<T>(std::forward<TArgs>(mArgs)...));
+        auto ptr(uPtr.get());
+
+        groupedEntities[typeid(T).hash_code()].emplace_back(ptr);
+        entities.emplace_back(std::move(uPtr));
+
+        return *ptr;
+    }
+
+    void refresh() {
+        for (auto& pair: groupedEntities) {
+            auto& vector(pair.second);
+
+            vector.erase(
+                std::remove_if(std::begin(vector), std::end(vector),
+                [](auto mPtr) { return mPtr->destroyed; }),
+                std::end(vector)
+            );
+        }
+        entities.erase(
+            std::remove_if(std::begin(entities), std::end(entities),
+            [](const auto& mUPtr) { return mUPtr->destroyed; }),
+            std::end(entities)
+        );
+    }
+
+    void clear() {
+        groupedEntities.clear();
+        entities.clear();
+    }
+
+    template<typename T>
+    auto& getAll() {
+        return groupedEntities[typeid(T).hash_code()];
+    }
+
+    template<typename T, typename TFunc>
+    void forEach(const TFunc& mFunc) {
+        auto& vector(getAll<T>());
+
+        for (auto ptr : vector) mFunc(*reinterpret_cast<T*>(ptr));
+    }
+
+    void update() {
+        for (auto& e : entities)
+            e->update();
+    }
+
+    void draw() {
+        for (auto& e : entities)
+            e->draw();
+    }
+};
 
 struct Rect {
     Color color{GRAY};
@@ -32,11 +110,11 @@ struct Circ {
     float bottom() const noexcept { return y() + radius; }
 };
 
-class Ball : public Circ {
+class Ball : public Entity, public Circ {
 public:
     static constexpr Color defColor{BLUE}; // "def" is for "default"
     static constexpr float defRadius{10.f};
-    static constexpr float defVelocity{3.f};
+    static constexpr float defVelocity{5.f};
 
     Vector2 velocity{-defVelocity, -defVelocity};
 
@@ -48,12 +126,12 @@ public:
 
     Ball() : Ball(wndWidth / 2.f, wndHeight / 2.f) {};
 
-    void update() {
+    void update() override {
         position = Vector2Add(position, velocity);
         solveBoundCollisions();
     }
 
-    void draw() {
+    void draw() override {
         DrawCircle(position.x, position.y, radius, color);
     }
 
@@ -71,7 +149,7 @@ private:
     }
 };
 
-class Paddle : public Rect {
+class Paddle : public Entity, public Rect {
 public:
     static constexpr Color defColor{MAGENTA};
     static constexpr float defWidth{60.f};
@@ -89,12 +167,12 @@ public:
 
     Paddle() : Paddle(wndWidth / 2.f, wndHeight - 50) {};
 
-    void update() {
+    void update() override {
         processPlayerInput();
         position = Vector2Add(position, velocity);
     }
 
-    void draw() {
+    void draw() override {
         DrawRectanglePro(
             (Rectangle){position.x, position.y, width, height},
             (Vector2){width / 2.f, height / 2.f},
@@ -113,13 +191,11 @@ private:
     }
 };
 
-class Brick : public Rect {
+class Brick : public Entity, public Rect {
 public:
     static constexpr Color defColor{RED};
     static constexpr float defWidth{60.f};
     static constexpr float defHeight{20.f};
-
-    bool destroyed{false};
 
     Brick(float mX, float mY) {
         color = defColor;
@@ -128,9 +204,9 @@ public:
         height = defHeight;
     }
 
-    void update() {}
+    void update() override {}
 
-    void draw() {
+    void draw() override {
         DrawRectanglePro(
             (Rectangle){position.x, position.y, width, height},
             (Vector2){width / 2.f, height / 2.f},
@@ -194,10 +270,7 @@ private:
     static constexpr int brkStartColumn{1}, brkStartRow{2};
     static constexpr float brkSpacing{3.f}, brkOffsetX{22.f};
 
-    Ball ball;
-    Paddle paddle;
-    std::vector<Brick> bricks;
-
+    Manager manager;
     State state{State::InProgress};
 
 public:
@@ -209,15 +282,17 @@ public:
     void restart() {
         state = State::InProgress;
 
-        ball = Ball();
-        paddle = Paddle();
+        manager.clear();
+
+        manager.create<Ball>();
+        manager.create<Paddle>();
         
         for (int iX{0}; iX < brkCountX; ++iX) {
             for (int iY{0}; iY < brkCountY; ++iY) {
                 float x{(iX + brkStartColumn) * (Brick::defWidth + brkSpacing)};
                 float y{(iY + brkStartRow) * (Brick::defHeight + brkSpacing)};
 
-                bricks.emplace_back(brkOffsetX + x, y);
+                manager.create<Brick>(brkOffsetX + x, y);
             }
         }
     }
@@ -236,27 +311,23 @@ public:
             }
 
             if (state == State::InProgress) {
-                ball.update();
-                paddle.update();
-                for (auto& brick : bricks) {
-                    brick.update();
-                    solveBrickBallCollision(brick, ball);
-                }
+                manager.update();
 
-                bricks.erase(
-                    std::remove_if(std::begin(bricks), std::end(bricks),
-                    [](const auto& mBrick) { return mBrick.destroyed; }),
-                    std::end(bricks)
-                );
+                manager.forEach<Ball>([this](auto& mBall) {
+                    manager.forEach<Brick>([this, &mBall](auto& mBrick) {
+                        solveBrickBallCollision(mBrick, mBall);
+                    });
+                    manager.forEach<Paddle>([this, &mBall](auto& mPaddle) {
+                        solvePaddleBallCollision(mPaddle, mBall);
+                    });
+                });
 
-                solvePaddleBallCollision(paddle, ball);
+                manager.refresh();
             }
 
             BeginDrawing();
             ClearBackground(BLACK);
-            ball.draw();
-            paddle.draw();
-            for (auto& brick : bricks) brick.draw();
+            manager.draw();
             EndDrawing();
         }
     }
