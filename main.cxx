@@ -115,7 +115,7 @@ class Ball : public Entity, public Circ {
 public:
     static constexpr Color defColor{BLUE}; // "def" is for "default"
     static constexpr float defRadius{10.f};
-    static constexpr float defVelocity{5.f*70.f};
+    static constexpr float defVelocity{5.f};
 
     Vector2 velocity{-defVelocity, -defVelocity};
 
@@ -155,7 +155,7 @@ public:
     static constexpr Color defColor{MAGENTA};
     static constexpr float defWidth{60.f};
     static constexpr float defHeight{20.f};
-    static constexpr float defVelocity{8.f*70.f};
+    static constexpr float defVelocity{8.f};
 
     Vector2 velocity{0, 0};
 
@@ -303,7 +303,7 @@ private:
 public:
     Game() {
         InitWindow(wndWidth, wndHeight, "Awesome Sauce");
-        SetTargetFPS(120);
+        SetTargetFPS(60);
     }
 
     void restart() {
@@ -329,7 +329,16 @@ public:
     }
 
     void run() {
+        float dt{0.f}; // Delta Time
+        float accumulator{0.f};
+        constexpr float tslice{0.02f}; // Tick Rate
+        constexpr float step{1.5f}; // Adjustable Simulation Step
+
         while (!WindowShouldClose()) {
+            dt = GetFrameTime();
+            accumulator += dt;
+
+            // Grab these inputs regardless of physics update
             if (IsKeyPressed(KEY_P)) {
                 switch (state) {
                     case State::Paused:
@@ -347,31 +356,37 @@ public:
                 restart();
             }
 
-            if (state == State::InProgress) {
-                if (manager.getAll<Ball>().empty()) {
-                    remainingLives--;
-                    if (remainingLives <= 0)
-                        state = State::GameOver;
-                    else
-                        manager.create<Ball>();
+            // Physics update!
+            while (accumulator > tslice) {
+                if (state == State::InProgress) {
+                    if (manager.getAll<Ball>().empty()) {
+                        remainingLives--;
+                        if (remainingLives <= 0)
+                            state = State::GameOver;
+                        else
+                            manager.create<Ball>();
+                    }
+                    if (manager.getAll<Brick>().empty())
+                        state = State::Victory;
+
+                    manager.update(step);
+
+                    manager.forEach<Ball>([this](auto& mBall) {
+                        manager.forEach<Brick>([this, &mBall](auto& mBrick) {
+                            solveBrickBallCollision(mBrick, mBall);
+                        });
+                        manager.forEach<Paddle>([this, &mBall](auto& mPaddle) {
+                            solvePaddleBallCollision(mPaddle, mBall);
+                        });
+                    });
+
+                    manager.refresh();
                 }
-                if (manager.getAll<Brick>().empty())
-                    state = State::Victory;
 
-                manager.update(GetFrameTime());
-
-                manager.forEach<Ball>([this](auto& mBall) {
-                    manager.forEach<Brick>([this, &mBall](auto& mBrick) {
-                        solveBrickBallCollision(mBrick, mBall);
-                    });
-                    manager.forEach<Paddle>([this, &mBall](auto& mPaddle) {
-                        solvePaddleBallCollision(mPaddle, mBall);
-                    });
-                });
-
-                manager.refresh();
+                accumulator -= tslice;
             }
 
+            // Drawing can be done independently of the physics update!
             std::string text{""};
             switch (state) {
                 case State::Paused:
