@@ -14,7 +14,7 @@ public:
     bool destroyed{false};
 
     virtual ~Entity() {}
-    virtual void update() {}
+    virtual void update(float dt) {}
     virtual void draw() {}
 };
 
@@ -73,9 +73,9 @@ public:
         for (auto ptr : vector) mFunc(*reinterpret_cast<T*>(ptr));
     }
 
-    void update() {
+    void update(float dt) {
         for (auto& e : entities)
-            e->update();
+            e->update(dt);
     }
 
     void draw() {
@@ -115,7 +115,7 @@ class Ball : public Entity, public Circ {
 public:
     static constexpr Color defColor{BLUE}; // "def" is for "default"
     static constexpr float defRadius{10.f};
-    static constexpr float defVelocity{5.f};
+    static constexpr float defVelocity{5.f*70.f};
 
     Vector2 velocity{-defVelocity, -defVelocity};
 
@@ -127,8 +127,8 @@ public:
 
     Ball() : Ball(wndWidth / 2.f, wndHeight / 2.f) {};
 
-    void update() override {
-        position = Vector2Add(position, velocity);
+    void update(float dt) override {
+        position = Vector2Add(position, velocity * dt);
         solveBoundCollisions();
     }
 
@@ -155,7 +155,7 @@ public:
     static constexpr Color defColor{MAGENTA};
     static constexpr float defWidth{60.f};
     static constexpr float defHeight{20.f};
-    static constexpr float defVelocity{8.f};
+    static constexpr float defVelocity{8.f*70.f};
 
     Vector2 velocity{0, 0};
 
@@ -168,9 +168,9 @@ public:
 
     Paddle() : Paddle(wndWidth / 2.f, wndHeight - 50) {};
 
-    void update() override {
+    void update(float dt) override {
         processPlayerInput();
-        position = Vector2Add(position, velocity);
+        position = Vector2Add(position, velocity * dt);
     }
 
     void draw() override {
@@ -212,7 +212,7 @@ public:
         refreshColor();
     }
 
-    void update() override {}
+    void update(float dt) override {}
 
     void draw() override {
         DrawRectanglePro(
@@ -303,7 +303,7 @@ private:
 public:
     Game() {
         InitWindow(wndWidth, wndHeight, "Awesome Sauce");
-        SetTargetFPS(60);
+        SetTargetFPS(120);
     }
 
     void restart() {
@@ -358,7 +358,7 @@ public:
                 if (manager.getAll<Brick>().empty())
                     state = State::Victory;
 
-                manager.update();
+                manager.update(GetFrameTime());
 
                 manager.forEach<Ball>([this](auto& mBall) {
                     manager.forEach<Brick>([this, &mBall](auto& mBrick) {

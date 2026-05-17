@@ -10,6 +10,7 @@ build:
 
 game: build
 	./$(OUTPUT)
+run: game
 
 clean:
 	rm -f $(OUTPUT)
